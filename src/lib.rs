@@ -1,10 +1,10 @@
 //! # Interval Tree Clocks
-//! 
+//!
 //! The itc crate implements Interval Tree Clocks as described in
 //! http://gsd.di.uminho.pt/members/cbm/ps/itc2008.pdf
-//! 
+//!
 //! # Usage:
-//! 
+//!
 //! ```
 //! use itc::*;
 //!
@@ -27,66 +27,63 @@
 //! Also in the box is a simple ascii coding representation suitable
 //! for printing to stdout and use in protocols.
 
-use std::cmp;
 use std::borrow::Cow;
+use std::cmp;
 
-pub mod ascii_coding;
+//pub mod ascii_coding;
 pub mod cost;
 
 use cost::*;
 
+#[cfg(feature = "serde")]
+pub mod serde;
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum IdTree {
     Leaf {
-        i: bool
+        i: bool,
     },
     Node {
         left: Box<IdTree>,
-        right: Box<IdTree>
-    }
+        right: Box<IdTree>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum EventTree {
     Leaf {
-        n: u32
+        n: u32,
     },
     Node {
         n: u32,
         left: Box<EventTree>,
-        right: Box<EventTree>
-    }
+        right: Box<EventTree>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Stamp {
     i: IdTree,
-    e: EventTree
+    e: EventTree,
 }
 
 impl IdTree {
     pub fn leaf(i: bool) -> IdTree {
-        IdTree::Leaf {
-            i: i
-        }
+        IdTree::Leaf { i: i }
     }
 
     pub fn zero() -> IdTree {
-        IdTree::Leaf {
-            i: false
-        }
+        IdTree::Leaf { i: false }
     }
 
     pub fn one() -> IdTree {
-        IdTree::Leaf {
-            i: true
-        }
+        IdTree::Leaf { i: true }
     }
 
     pub fn node(left: Box<IdTree>, right: Box<IdTree>) -> IdTree {
         IdTree::Node {
             left: left,
-            right: right
+            right: right,
         }
     }
 }
@@ -97,70 +94,78 @@ impl EventTree {
     }
 
     pub fn leaf(n: u32) -> EventTree {
-        EventTree::Leaf {
-            n: n
-        }
+        EventTree::Leaf { n: n }
     }
 
     pub fn node(n: u32, left: Box<EventTree>, right: Box<EventTree>) -> EventTree {
         EventTree::Node {
             n: n,
             left: left,
-            right: right
+            right: right,
         }
     }
 
     pub fn n(&self) -> u32 {
         match self {
             &EventTree::Leaf { n } => n,
-            &EventTree::Node { n, .. } => n
+            &EventTree::Node { n, .. } => n,
         }
     }
 
     pub fn lift(self, m: u32) -> EventTree {
         match self {
             EventTree::Leaf { n } => EventTree::leaf(n + m),
-            EventTree::Node { n, left, right } => EventTree::node(n + m, left, right)
+            EventTree::Node { n, left, right } => EventTree::node(n + m, left, right),
         }
     }
 
     pub fn sink(self, m: u32) -> EventTree {
         match self {
             EventTree::Leaf { n } => EventTree::leaf(n - m),
-            EventTree::Node { n, left, right } => EventTree::node(n - m, left, right)
+            EventTree::Node { n, left, right } => EventTree::node(n - m, left, right),
         }
     }
 
     pub fn join(&self, other: &EventTree) -> EventTree {
         match *self {
-            EventTree::Leaf {n: n1} => {
-                match *other {
-                    EventTree::Leaf {n: n2} => {
-                        EventTree::leaf(cmp::max(n1, n2))
-                    },
-                    EventTree::Node {..} => {
-                        let new_left = EventTree::node(n1, Box::new(EventTree::zero()), Box::new(EventTree::zero()));
-                        new_left.join(other)
+            EventTree::Leaf { n: n1 } => match *other {
+                EventTree::Leaf { n: n2 } => EventTree::leaf(cmp::max(n1, n2)),
+                EventTree::Node { .. } => {
+                    let new_left = EventTree::node(
+                        n1,
+                        Box::new(EventTree::zero()),
+                        Box::new(EventTree::zero()),
+                    );
+                    new_left.join(other)
+                }
+            },
+            EventTree::Node {
+                n: n1,
+                left: ref left1,
+                right: ref right1,
+            } => match *other {
+                EventTree::Leaf { n: n2 } => {
+                    let new_right = EventTree::node(
+                        n2,
+                        Box::new(EventTree::zero()),
+                        Box::new(EventTree::zero()),
+                    );
+                    self.join(&new_right)
+                }
+                EventTree::Node {
+                    n: n2,
+                    left: ref left2,
+                    right: ref right2,
+                } => {
+                    if n1 > n2 {
+                        other.join(self)
+                    } else {
+                        let new_left = left1.join(&left2.clone().lift(n2 - n1));
+                        let new_right = right1.join(&right2.clone().lift(n2 - n1));
+                        EventTree::node(n1, Box::new(new_left), Box::new(new_right)).norm()
                     }
                 }
             },
-            EventTree::Node {n: n1, left: ref left1, right: ref right1} => {
-                match *other {
-                    EventTree::Leaf {n: n2} => {
-                        let new_right = EventTree::node(n2, Box::new(EventTree::zero()), Box::new(EventTree::zero()));
-                        self.join(&new_right)
-                    },
-                    EventTree::Node {n: n2, left: ref left2, right: ref right2} => {
-                        if n1 > n2 {
-                            other.join(self)
-                        } else {
-                            let new_left = left1.join(&left2.clone().lift(n2 - n1));
-                            let new_right = right1.join(&right2.clone().lift(n2 - n1));
-                            EventTree::node(n1, Box::new(new_left), Box::new(new_right)).norm()
-                        }
-                    }
-                }
-            }
         }
     }
 }
@@ -171,10 +176,7 @@ impl Stamp {
     }
 
     pub fn new(i: IdTree, e: EventTree) -> Stamp {
-        Stamp {
-            i: i,
-            e: e
-        }
+        Stamp { i: i, e: e }
     }
 
     pub fn fill<'a>(&'a self) -> Cow<'a, EventTree> {
@@ -182,23 +184,49 @@ impl Stamp {
             Cow::Borrowed(&self.e)
         } else if self.i == IdTree::one() {
             Cow::Owned(EventTree::leaf(self.e.max()))
-        } else if let EventTree::Leaf {..} = self.e {
+        } else if let EventTree::Leaf { .. } = self.e {
             Cow::Borrowed(&self.e)
         } else {
-            if let IdTree::Node {left: ref i_left, right: ref i_right} = self.i {
-                if let EventTree::Node {n, left: ref e_left, right: ref e_right} = self.e {
+            if let IdTree::Node {
+                left: ref i_left,
+                right: ref i_right,
+            } = self.i
+            {
+                if let EventTree::Node {
+                    n,
+                    left: ref e_left,
+                    right: ref e_right,
+                } = self.e
+                {
                     if i_left.as_ref() == &IdTree::one() {
-                        let eprime_right = Stamp::new(i_right.as_ref().clone(), e_right.as_ref().clone()).fill().into_owned();
+                        let eprime_right =
+                            Stamp::new(i_right.as_ref().clone(), e_right.as_ref().clone())
+                                .fill()
+                                .into_owned();
                         let new_left = EventTree::leaf(cmp::max(e_left.max(), eprime_right.min()));
-                        Cow::Owned(EventTree::node(n, Box::new(new_left), Box::new(eprime_right)).norm())
+                        Cow::Owned(
+                            EventTree::node(n, Box::new(new_left), Box::new(eprime_right)).norm(),
+                        )
                     } else if i_right.as_ref() == &IdTree::one() {
-                        let eprime_left = Stamp::new(i_left.as_ref().clone(), e_left.as_ref().clone()).fill().into_owned();
+                        let eprime_left =
+                            Stamp::new(i_left.as_ref().clone(), e_left.as_ref().clone())
+                                .fill()
+                                .into_owned();
                         let new_right = EventTree::leaf(cmp::max(e_right.max(), eprime_left.min()));
-                        Cow::Owned(EventTree::node(n, Box::new(eprime_left), Box::new(new_right)).norm())
+                        Cow::Owned(
+                            EventTree::node(n, Box::new(eprime_left), Box::new(new_right)).norm(),
+                        )
                     } else {
-                        let new_left = Stamp::new(i_left.as_ref().clone(), e_left.as_ref().clone()).fill().into_owned();
-                        let new_right = Stamp::new(i_right.as_ref().clone(), e_right.as_ref().clone()).fill().into_owned();
-                        Cow::Owned(EventTree::node(n, Box::new(new_left), Box::new(new_right)).norm())
+                        let new_left = Stamp::new(i_left.as_ref().clone(), e_left.as_ref().clone())
+                            .fill()
+                            .into_owned();
+                        let new_right =
+                            Stamp::new(i_right.as_ref().clone(), e_right.as_ref().clone())
+                                .fill()
+                                .into_owned();
+                        Cow::Owned(
+                            EventTree::node(n, Box::new(new_left), Box::new(new_right)).norm(),
+                        )
                     }
                 } else {
                     unreachable!()
@@ -212,30 +240,58 @@ impl Stamp {
     // returns event tree and cost
     pub fn grow(&self) -> (EventTree, Cost) {
         match self.e {
-            EventTree::Leaf {n} => {
+            EventTree::Leaf { n } => {
                 if self.i == IdTree::one() {
                     (EventTree::leaf(n + 1), Cost::zero())
                 } else {
-                    let new_e = EventTree::node(n, Box::new(EventTree::zero()), Box::new(EventTree::zero()));
+                    let new_e = EventTree::node(
+                        n,
+                        Box::new(EventTree::zero()),
+                        Box::new(EventTree::zero()),
+                    );
                     let (eprime, c) = Stamp::new(self.i.clone(), new_e).grow();
                     (eprime, c.shift())
                 }
-            },
-            EventTree::Node {n, left: ref e_left, right: ref e_right} => {
-                if let IdTree::Node {left: ref i_left, right: ref i_right} = self.i {
+            }
+            EventTree::Node {
+                n,
+                left: ref e_left,
+                right: ref e_right,
+            } => {
+                if let IdTree::Node {
+                    left: ref i_left,
+                    right: ref i_right,
+                } = self.i
+                {
                     if **i_left == IdTree::zero() {
-                        let (eprime_right, c_right) = Stamp::new(i_right.as_ref().clone(), e_right.as_ref().clone()).grow();    
-                        (EventTree::node(n, e_left.clone(), Box::new(eprime_right)), c_right + 1)
+                        let (eprime_right, c_right) =
+                            Stamp::new(i_right.as_ref().clone(), e_right.as_ref().clone()).grow();
+                        (
+                            EventTree::node(n, e_left.clone(), Box::new(eprime_right)),
+                            c_right + 1,
+                        )
                     } else if **i_right == IdTree::zero() {
-                        let (eprime_left, c_left) = Stamp::new(*i_left.clone(), *e_left.clone()).grow();
-                        (EventTree::node(n, Box::new(eprime_left), e_right.clone()), c_left + 1)
+                        let (eprime_left, c_left) =
+                            Stamp::new(*i_left.clone(), *e_left.clone()).grow();
+                        (
+                            EventTree::node(n, Box::new(eprime_left), e_right.clone()),
+                            c_left + 1,
+                        )
                     } else {
-                        let (eprime_right, c_right) = Stamp::new(*i_right.clone(), *e_right.clone()).grow();
-                        let (eprime_left, c_left) = Stamp::new(*i_left.clone(), *e_left.clone()).grow();
+                        let (eprime_right, c_right) =
+                            Stamp::new(*i_right.clone(), *e_right.clone()).grow();
+                        let (eprime_left, c_left) =
+                            Stamp::new(*i_left.clone(), *e_left.clone()).grow();
                         if c_left < c_right {
-                            (EventTree::node(n, Box::new(eprime_left), e_right.clone()), c_left + 1)
+                            (
+                                EventTree::node(n, Box::new(eprime_left), e_right.clone()),
+                                c_left + 1,
+                            )
                         } else {
-                            (EventTree::node(n, e_left.clone(), Box::new(eprime_right)), c_right + 1)
+                            (
+                                EventTree::node(n, e_left.clone(), Box::new(eprime_right)),
+                                c_right + 1,
+                            )
                         }
                     }
                 } else {
@@ -248,7 +304,7 @@ impl Stamp {
 }
 
 pub trait Min<T> {
-    fn min(&self) -> T; 
+    fn min(&self) -> T;
 }
 
 pub trait Max<T> {
@@ -258,8 +314,12 @@ pub trait Max<T> {
 impl Min<u32> for EventTree {
     fn min(&self) -> u32 {
         match *self {
-            EventTree::Leaf{n} => n,
-            EventTree::Node{n, ref left, ref right} => n + cmp::min(left.min(), right.min())
+            EventTree::Leaf { n } => n,
+            EventTree::Node {
+                n,
+                ref left,
+                ref right,
+            } => n + cmp::min(left.min(), right.min()),
         }
     }
 }
@@ -267,8 +327,12 @@ impl Min<u32> for EventTree {
 impl Max<u32> for EventTree {
     fn max(&self) -> u32 {
         match *self {
-            EventTree::Leaf{n} => n,
-            EventTree::Node{n, ref left, ref right} => n + cmp::max(left.max(), right.max())
+            EventTree::Leaf { n } => n,
+            EventTree::Node {
+                n,
+                ref left,
+                ref right,
+            } => n + cmp::max(left.max(), right.max()),
         }
     }
 }
@@ -281,15 +345,15 @@ impl Normalisable for IdTree {
     #[allow(non_shorthand_field_patterns)]
     fn norm(self) -> IdTree {
         match self {
-            IdTree::Leaf {i: _} => {
+            IdTree::Leaf { i: _ } => {
                 return self;
             }
-            IdTree::Node {left, right} => {
+            IdTree::Node { left, right } => {
                 let norm_left = left.norm();
                 let norm_right = right.norm();
 
-                if let IdTree::Leaf{i: i1} = norm_left {
-                    if let IdTree::Leaf{i: i2} = norm_right {
+                if let IdTree::Leaf { i: i1 } = norm_left {
+                    if let IdTree::Leaf { i: i2 } = norm_right {
                         if i1 == i2 {
                             return norm_left;
                         }
@@ -305,15 +369,15 @@ impl Normalisable for IdTree {
 impl Normalisable for EventTree {
     fn norm(self) -> EventTree {
         match self {
-            EventTree::Leaf {n: _} => {
+            EventTree::Leaf { n: _ } => {
                 return self;
-            },
-            EventTree::Node {n, left, right} => {
+            }
+            EventTree::Node { n, left, right } => {
                 let norm_left = left.norm();
                 let norm_right = right.norm();
 
-                if let EventTree::Leaf{n: m1} = norm_left {
-                    if let EventTree::Leaf{n: m2} = norm_right {
+                if let EventTree::Leaf { n: m1 } = norm_left {
+                    if let EventTree::Leaf { n: m2 } = norm_right {
                         if m1 == m2 {
                             return EventTree::leaf(n + m1);
                         }
@@ -326,7 +390,11 @@ impl Normalisable for EventTree {
 
                 let m = cmp::min(min_left, min_right);
 
-                return EventTree::node(n + m, Box::new(norm_left.sink(m)), Box::new(norm_right.sink(m)));
+                return EventTree::node(
+                    n + m,
+                    Box::new(norm_left.sink(m)),
+                    Box::new(norm_right.sink(m)),
+                );
             }
         }
     }
@@ -352,30 +420,30 @@ impl LessThanOrEqual for EventTree {
     #[allow(non_shorthand_field_patterns)]
     fn leq(&self, other: &EventTree) -> bool {
         match *self {
-            EventTree::Leaf {n: n1} => {
-                match *other {
-                    EventTree::Leaf {n: n2} => {
-                        n1 <= n2
-                    },
-                    EventTree::Node {n: n2, ..} => {
-                        n1 <= n2
-                    }
-                }
+            EventTree::Leaf { n: n1 } => match *other {
+                EventTree::Leaf { n: n2 } => n1 <= n2,
+                EventTree::Node { n: n2, .. } => n1 <= n2,
             },
-            EventTree::Node {n: n1, left: ref left1, right: ref right1} => {
-                match *other {
-                    EventTree::Leaf {n: n2} => {
-                        (n1 <= n2) 
-                        && left1.clone().lift(n1).leq(&EventTree::leaf(n2)) 
+            EventTree::Node {
+                n: n1,
+                left: ref left1,
+                right: ref right1,
+            } => match *other {
+                EventTree::Leaf { n: n2 } => {
+                    (n1 <= n2)
+                        && left1.clone().lift(n1).leq(&EventTree::leaf(n2))
                         && right1.clone().lift(n1).leq(&EventTree::leaf(n2))
-                    },
-                    EventTree::Node {n: n2, left: ref left2, right: ref right2} => {
-                        (n1 <= n2)
+                }
+                EventTree::Node {
+                    n: n2,
+                    left: ref left2,
+                    right: ref right2,
+                } => {
+                    (n1 <= n2)
                         && left1.clone().lift(n1).leq(&left2.clone().lift(n2))
                         && right1.clone().lift(n1).leq(&right2.clone().lift(n2))
-                    }
                 }
-            }
+            },
         }
     }
 }
@@ -387,19 +455,32 @@ pub trait Split {
 impl Split for IdTree {
     fn split(&self) -> IdTree {
         match *self {
-            IdTree::Leaf {i} => {
+            IdTree::Leaf { i } => {
                 if !i {
                     IdTree::node(Box::new(IdTree::zero()), Box::new(IdTree::zero()))
                 } else {
-                    let new_left = Box::new(IdTree::node(Box::new(IdTree::one()), Box::new(IdTree::zero())));
-                    let new_right = Box::new(IdTree::node(Box::new(IdTree::zero()), Box::new(IdTree::one())));
+                    let new_left = Box::new(IdTree::node(
+                        Box::new(IdTree::one()),
+                        Box::new(IdTree::zero()),
+                    ));
+                    let new_right = Box::new(IdTree::node(
+                        Box::new(IdTree::zero()),
+                        Box::new(IdTree::one()),
+                    ));
                     IdTree::node(new_left, new_right)
                 }
-            },
-            IdTree::Node {ref left, ref right} => {
+            }
+            IdTree::Node {
+                ref left,
+                ref right,
+            } => {
                 if *left.as_ref() == IdTree::zero() {
                     // split always returns a Node, not a Leaf
-                    if let IdTree::Node{left: i1, right: i2} = right.split() {
+                    if let IdTree::Node {
+                        left: i1,
+                        right: i2,
+                    } = right.split()
+                    {
                         let new_left = Box::new(IdTree::node(Box::new(IdTree::zero()), i1));
                         let new_right = Box::new(IdTree::node(Box::new(IdTree::zero()), i2));
                         IdTree::node(new_left, new_right)
@@ -407,7 +488,11 @@ impl Split for IdTree {
                         unreachable!()
                     }
                 } else if *right.as_ref() == IdTree::zero() {
-                    if let IdTree::Node{left: i1, right: i2} = left.split() {
+                    if let IdTree::Node {
+                        left: i1,
+                        right: i2,
+                    } = left.split()
+                    {
                         let new_left = Box::new(IdTree::node(i1, Box::new(IdTree::zero())));
                         let new_right = Box::new(IdTree::node(i2, Box::new(IdTree::zero())));
                         IdTree::node(new_left, new_right)
@@ -437,8 +522,16 @@ impl Sum for IdTree {
             return self.clone();
         }
 
-        if let IdTree::Node {left: ref left1, right: ref right1} = *self {
-            if let IdTree::Node {left: ref left2, right: ref right2} = *other {
+        if let IdTree::Node {
+            left: ref left1,
+            right: ref right1,
+        } = *self
+        {
+            if let IdTree::Node {
+                left: ref left2,
+                right: ref right2,
+            } = *other
+            {
                 let new_left = Box::new(left1.sum(left2));
                 let new_right = Box::new(right1.sum(right2));
                 return IdTree::node(new_left, new_right).norm();
@@ -453,8 +546,10 @@ impl Sum for IdTree {
     }
 }
 
-pub trait IntervalTreeClock where Self: Sized {
-    
+pub trait IntervalTreeClock
+where
+    Self: Sized,
+{
     fn fork(&self) -> (Self, Self);
     fn peek(&self) -> (Self, Self);
     fn join(&self, other: &Self) -> Self;
@@ -469,11 +564,11 @@ impl IntervalTreeClock for Stamp {
     fn peek(&self) -> (Stamp, Stamp) {
         let s1 = Stamp::new(IdTree::zero(), self.e.clone());
         let s2 = Stamp::new(self.i.clone(), self.e.clone());
-        return (s1, s2)
+        return (s1, s2);
     }
 
     fn fork(&self) -> (Stamp, Stamp) {
-        if let IdTree::Node {left, right} = self.i.split() {
+        if let IdTree::Node { left, right } = self.i.split() {
             let s1 = Stamp::new(*left, self.e.clone());
             let s2 = Stamp::new(*right, self.e.clone());
             (s1, s2)
@@ -554,7 +649,13 @@ mod tests {
 
     #[test]
     fn norm_id_1_1_1_is_1() {
-        let idt = IdTree::node(Box::new(IdTree::one()), Box::new(IdTree::node(Box::new(IdTree::one()), Box::new(IdTree::one()))));
+        let idt = IdTree::node(
+            Box::new(IdTree::one()),
+            Box::new(IdTree::node(
+                Box::new(IdTree::one()),
+                Box::new(IdTree::one()),
+            )),
+        );
         let nidt = idt.clone().norm();
         assert_eq!(nidt, IdTree::one());
     }
@@ -562,7 +663,11 @@ mod tests {
     // (2, 1, 1) ~=~ 3
     #[test]
     fn norm_e_one() {
-        let et = EventTree::node(2, Box::new(EventTree::leaf(1)), Box::new(EventTree::leaf(1)));
+        let et = EventTree::node(
+            2,
+            Box::new(EventTree::leaf(1)),
+            Box::new(EventTree::leaf(1)),
+        );
         let net = et.clone().norm();
         assert_eq!(net, EventTree::leaf(3));
     }
@@ -570,11 +675,19 @@ mod tests {
     // (2, (2, 1, 0), 3) ~=~ (4, (0, 1, 0), 1)
     #[test]
     fn norm_e_two() {
-        let a = Box::new(EventTree::node(2, Box::new(EventTree::leaf(1)), Box::new(EventTree::leaf(0))));
+        let a = Box::new(EventTree::node(
+            2,
+            Box::new(EventTree::leaf(1)),
+            Box::new(EventTree::leaf(0)),
+        ));
         let b = Box::new(EventTree::leaf(3));
         let et = EventTree::node(2, a, b);
 
-        let expected_a = Box::new(EventTree::node(0, Box::new(EventTree::leaf(1)), Box::new(EventTree::leaf(0))));
+        let expected_a = Box::new(EventTree::node(
+            0,
+            Box::new(EventTree::leaf(1)),
+            Box::new(EventTree::leaf(0)),
+        ));
         let expected_b = Box::new(EventTree::leaf(1));
         let expected = EventTree::node(4, expected_a, expected_b);
 
@@ -585,7 +698,19 @@ mod tests {
 
     #[test]
     fn split_test() {
-        assert_eq!(IdTree::one().split(), IdTree::node(Box::new(IdTree::node(Box::new(IdTree::one()), Box::new(IdTree::zero()))), Box::new(IdTree::node(Box::new(IdTree::zero()), Box::new(IdTree::one())))));
+        assert_eq!(
+            IdTree::one().split(),
+            IdTree::node(
+                Box::new(IdTree::node(
+                    Box::new(IdTree::one()),
+                    Box::new(IdTree::zero())
+                )),
+                Box::new(IdTree::node(
+                    Box::new(IdTree::zero()),
+                    Box::new(IdTree::one())
+                ))
+            )
+        );
     }
 
     #[test]
@@ -593,43 +718,167 @@ mod tests {
         let seed = Stamp::seed();
         let (l, r) = seed.fork();
 
-        assert_eq!(l, Stamp::new(IdTree::node(Box::new(IdTree::one()), Box::new(IdTree::zero())), EventTree::zero()));
-        assert_eq!(r, Stamp::new(IdTree::node(Box::new(IdTree::zero()), Box::new(IdTree::one())), EventTree::zero()));
+        assert_eq!(
+            l,
+            Stamp::new(
+                IdTree::node(Box::new(IdTree::one()), Box::new(IdTree::zero())),
+                EventTree::zero()
+            )
+        );
+        assert_eq!(
+            r,
+            Stamp::new(
+                IdTree::node(Box::new(IdTree::zero()), Box::new(IdTree::one())),
+                EventTree::zero()
+            )
+        );
 
         let le = l.event();
         let re = r.event();
 
-        assert_eq!(le, Stamp::new(IdTree::node(Box::new(IdTree::one()), Box::new(IdTree::zero())), EventTree::node(0, Box::new(EventTree::leaf(1)), Box::new(EventTree::zero()))));
-        assert_eq!(re, Stamp::new(IdTree::node(Box::new(IdTree::zero()), Box::new(IdTree::one())), EventTree::node(0, Box::new(EventTree::zero()), Box::new(EventTree::leaf(1)))));
+        assert_eq!(
+            le,
+            Stamp::new(
+                IdTree::node(Box::new(IdTree::one()), Box::new(IdTree::zero())),
+                EventTree::node(0, Box::new(EventTree::leaf(1)), Box::new(EventTree::zero()))
+            )
+        );
+        assert_eq!(
+            re,
+            Stamp::new(
+                IdTree::node(Box::new(IdTree::zero()), Box::new(IdTree::one())),
+                EventTree::node(0, Box::new(EventTree::zero()), Box::new(EventTree::leaf(1)))
+            )
+        );
 
         let (lel, ler) = le.fork();
 
-        assert_eq!(lel, Stamp::new(IdTree::node(Box::new(IdTree::node(Box::new(IdTree::one()), Box::new(IdTree::zero()))), Box::new(IdTree::zero())), EventTree::node(0, Box::new(EventTree::leaf(1)), Box::new(EventTree::zero()))));
-        assert_eq!(ler, Stamp::new(IdTree::node(Box::new(IdTree::node(Box::new(IdTree::zero()), Box::new(IdTree::one()))), Box::new(IdTree::zero())), EventTree::node(0, Box::new(EventTree::leaf(1)), Box::new(EventTree::zero()))));
+        assert_eq!(
+            lel,
+            Stamp::new(
+                IdTree::node(
+                    Box::new(IdTree::node(
+                        Box::new(IdTree::one()),
+                        Box::new(IdTree::zero())
+                    )),
+                    Box::new(IdTree::zero())
+                ),
+                EventTree::node(0, Box::new(EventTree::leaf(1)), Box::new(EventTree::zero()))
+            )
+        );
+        assert_eq!(
+            ler,
+            Stamp::new(
+                IdTree::node(
+                    Box::new(IdTree::node(
+                        Box::new(IdTree::zero()),
+                        Box::new(IdTree::one())
+                    )),
+                    Box::new(IdTree::zero())
+                ),
+                EventTree::node(0, Box::new(EventTree::leaf(1)), Box::new(EventTree::zero()))
+            )
+        );
 
         let ree = re.event();
 
-        assert_eq!(ree, Stamp::new(IdTree::node(Box::new(IdTree::zero()), Box::new(IdTree::one())), EventTree::node(0, Box::new(EventTree::zero()), Box::new(EventTree::leaf(2)))));
+        assert_eq!(
+            ree,
+            Stamp::new(
+                IdTree::node(Box::new(IdTree::zero()), Box::new(IdTree::one())),
+                EventTree::node(0, Box::new(EventTree::zero()), Box::new(EventTree::leaf(2)))
+            )
+        );
 
         let lele = lel.event();
 
-        assert_eq!(lele, Stamp::new(IdTree::node(Box::new(IdTree::node(Box::new(IdTree::one()), Box::new(IdTree::zero()))), Box::new(IdTree::zero())), EventTree::node(0, Box::new(EventTree::node(1, Box::new(EventTree::leaf(1)), Box::new(EventTree::zero()))), Box::new(EventTree::zero()))));
+        assert_eq!(
+            lele,
+            Stamp::new(
+                IdTree::node(
+                    Box::new(IdTree::node(
+                        Box::new(IdTree::one()),
+                        Box::new(IdTree::zero())
+                    )),
+                    Box::new(IdTree::zero())
+                ),
+                EventTree::node(
+                    0,
+                    Box::new(EventTree::node(
+                        1,
+                        Box::new(EventTree::leaf(1)),
+                        Box::new(EventTree::zero())
+                    )),
+                    Box::new(EventTree::zero())
+                )
+            )
+        );
 
         let lerjree = ler.join(&ree);
 
-        assert_eq!(lerjree, Stamp::new(IdTree::node(Box::new(IdTree::node(Box::new(IdTree::zero()), Box::new(IdTree::one()))), Box::new(IdTree::one())), EventTree::node(1, Box::new(EventTree::zero()), Box::new(EventTree::leaf(1)))));
+        assert_eq!(
+            lerjree,
+            Stamp::new(
+                IdTree::node(
+                    Box::new(IdTree::node(
+                        Box::new(IdTree::zero()),
+                        Box::new(IdTree::one())
+                    )),
+                    Box::new(IdTree::one())
+                ),
+                EventTree::node(1, Box::new(EventTree::zero()), Box::new(EventTree::leaf(1)))
+            )
+        );
 
         let (lerjreel, lerjreer) = lerjree.fork();
 
-        assert_eq!(lerjreel, Stamp::new(IdTree::node(Box::new(IdTree::node(Box::new(IdTree::zero()), Box::new(IdTree::one()))), Box::new(IdTree::zero())), EventTree::node(1, Box::new(EventTree::zero()), Box::new(EventTree::leaf(1)))));
-        assert_eq!(lerjreer, Stamp::new(IdTree::node(Box::new(IdTree::zero()), Box::new(IdTree::one())), EventTree::node(1, Box::new(EventTree::zero()), Box::new(EventTree::leaf(1)))));
+        assert_eq!(
+            lerjreel,
+            Stamp::new(
+                IdTree::node(
+                    Box::new(IdTree::node(
+                        Box::new(IdTree::zero()),
+                        Box::new(IdTree::one())
+                    )),
+                    Box::new(IdTree::zero())
+                ),
+                EventTree::node(1, Box::new(EventTree::zero()), Box::new(EventTree::leaf(1)))
+            )
+        );
+        assert_eq!(
+            lerjreer,
+            Stamp::new(
+                IdTree::node(Box::new(IdTree::zero()), Box::new(IdTree::one())),
+                EventTree::node(1, Box::new(EventTree::zero()), Box::new(EventTree::leaf(1)))
+            )
+        );
 
         let lelejlerjreel = lele.join(&lerjreel);
 
-        assert_eq!(lelejlerjreel, Stamp::new(IdTree::node(Box::new(IdTree::one()), Box::new(IdTree::zero())), EventTree::node(1, Box::new(EventTree::node(0, Box::new(EventTree::leaf(1)), Box::new(EventTree::zero()))), Box::new(EventTree::leaf(1)))));
+        assert_eq!(
+            lelejlerjreel,
+            Stamp::new(
+                IdTree::node(Box::new(IdTree::one()), Box::new(IdTree::zero())),
+                EventTree::node(
+                    1,
+                    Box::new(EventTree::node(
+                        0,
+                        Box::new(EventTree::leaf(1)),
+                        Box::new(EventTree::zero())
+                    )),
+                    Box::new(EventTree::leaf(1))
+                )
+            )
+        );
 
         let lelejlerjreele = lelejlerjreel.event();
 
-        assert_eq!(lelejlerjreele, Stamp::new(IdTree::node(Box::new(IdTree::one()), Box::new(IdTree::zero())), EventTree::leaf(2)));
+        assert_eq!(
+            lelejlerjreele,
+            Stamp::new(
+                IdTree::node(Box::new(IdTree::one()), Box::new(IdTree::zero())),
+                EventTree::leaf(2)
+            )
+        );
     }
 }
