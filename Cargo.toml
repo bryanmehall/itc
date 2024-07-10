@@ -14,4 +14,6 @@ serde = ["dep:serde", "serde/derive"]
 
 [dependencies]
 serde = {vesrion = "1.0.204", features = ["derive"], optional = true}
-serde_json = "1.0.120"
+
+[dev-dependencies]
+serde_json = {version = "1.0.120"}

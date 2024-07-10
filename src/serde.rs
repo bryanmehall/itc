@@ -103,6 +103,7 @@ impl<'de> Deserialize<'de> for Stamp {
 mod tests {
     use super::*;
     #[test]
+    /// Expect that serializing the empty stamp gives the expected string and
     fn empty() {
         let stamp = Stamp::seed();
         let serialized = serde_json::to_string(&stamp).unwrap();
