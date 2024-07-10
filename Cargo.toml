@@ -13,7 +13,7 @@ keywords = ["interval", "clocks", "vector", "causal", "lamport"]
 serde = ["dep:serde", "serde/derive"]
 
 [dependencies]
-serde = {vesrion = "1.0.204", features = ["derive"], optional = true}
+serde = {version = "1.0.204", features = ["derive"], optional = true}
 
 [dev-dependencies]
 serde_json = {version = "1.0.120"}
