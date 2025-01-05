@@ -38,6 +38,7 @@ use cost::*;
 #[cfg(feature = "serde")]
 pub mod serde;
 
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug, Clone, PartialEq)]
 pub enum IdTree {
     Leaf {
@@ -49,7 +50,8 @@ pub enum IdTree {
     },
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Debug, Clone, PartialEq )]
 pub enum EventTree {
     Leaf {
         n: u32,
