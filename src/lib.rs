@@ -36,7 +36,7 @@ pub mod cost;
 use cost::*;
 
 #[cfg(feature = "serde")]
-pub mod serde;
+use serde::{Serialize, Deserialize};
 
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug, Clone, PartialEq)]
@@ -305,10 +305,10 @@ impl Stamp {
     }
 
     pub fn id_tree(&self) -> IdTree {
-        self.i
+        self.i.clone()
     }
     pub fn event_tree(&self) -> EventTree {
-        self.e
+        self.e.clone()
     }
 }
 
