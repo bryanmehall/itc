@@ -303,6 +303,13 @@ impl Stamp {
             }
         }
     }
+
+    pub fn id_tree(&self) -> IdTree {
+        self.i
+    }
+    pub fn event_tree(&self) -> EventTree {
+        self.e
+    }
 }
 
 pub trait Min<T> {
